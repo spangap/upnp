@@ -1,0 +1,17 @@
+{
+  "name": "upnp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser-side UI for the upnp straddle: UPnP IGD port-mapping settings panel under Settings → Network.",
+  "license": "MIT",
+  "exports": {
+    "./modules/*": "./src/modules/*.ts",
+    "./panels/*.vue": "./src/panels/*.vue"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0",
+    "quasar": "^2.17.0",
+    "pinia": "^3.0.4",
+    "spangap-browser": "*"
+  }
+}

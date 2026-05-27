@@ -1,0 +1,10 @@
+# upnp — UPnP IGD port mapping for spangap.
+schema_version: 1
+name: spangap/upnp
+prefix: upnp
+version: 0.1.0
+firmware: esp-idf
+browser: browser
+platforms: [idf]
+requires:
+  - spangap/spangap-net
