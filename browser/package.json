@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Browser-side UI for the upnp straddle: UPnP IGD port-mapping settings panel under Settings → Network.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     "./modules/*": "./src/modules/*.ts",
     "./panels/*.vue": "./src/panels/*.vue"
