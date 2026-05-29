@@ -8,3 +8,7 @@ browser: browser
 platforms: [idf]
 requires:
   - spangap/spangap-net
+optional_requires:
+  # upnp.cpp registers on-device Settings panes via spangap-lcd's
+  # lcdSetting* helpers, gated on CONFIG_SPANGAP_LCD.
+  - spangap/spangap-lcd
