@@ -422,22 +422,22 @@ static void upnpStatus(cli_write_fn write) {
     char buf[128];
     int n;
     if (!storageGetInt("s.upnp.enable")) {
-        n = snprintf(buf, sizeof(buf), "  upnp: disabled\n");
+        n = snprintf(buf, sizeof(buf), "upnp: disabled\n");
         write(buf, (size_t)n);
         return;
     }
-    n = snprintf(buf, sizeof(buf), "  upnp: %s\n", discovered ? "discovered" : "searching");
+    n = snprintf(buf, sizeof(buf), "upnp: %s\n", discovered ? "discovered" : "searching");
     write(buf, (size_t)n);
     if (discovered) {
-        n = snprintf(buf, sizeof(buf), "  gateway: %s:%d\n", gwHost.c_str(), gwPort);
+        n = snprintf(buf, sizeof(buf), "gateway: %s:%d\n", gwHost.c_str(), gwPort);
         write(buf, (size_t)n);
     }
     if (!extIp.empty()) {
-        n = snprintf(buf, sizeof(buf), "  external IP: %s\n", extIp.c_str());
+        n = snprintf(buf, sizeof(buf), "external IP: %s\n", extIp.c_str());
         write(buf, (size_t)n);
     }
     for (auto& f : activeForwards) {
-        n = snprintf(buf, sizeof(buf), "  forward: %s %d → %s:%d\n",
+        n = snprintf(buf, sizeof(buf), "forward: %s %d → %s:%d\n",
                      f.proto, f.extPort, localIp, f.intPort);
         write(buf, (size_t)n);
     }
@@ -473,13 +473,12 @@ void upnpInit() {
     netRegister(NET_EV_UPSTREAM_UP,   upnpStart);
     netRegister(NET_EV_UPSTREAM_DOWN, upnpStop);
     static auto w = [](const char* d, size_t l) { cliPrintf("%.*s", (int)l, d); };
-    cliRegisterCmd("upnp update", [](const char*) { upnpUpdate(); });
+    cliRegisterCmd("upnp update", [](const char* a) {
+        if (cliWantsHelp(a)) { cliPrintf("%-*s renew port mappings + refresh external IP\n", CLI_HELP_COL, "upnp update"); return; }
+        upnpUpdate();
+    });
     cliRegisterCmd("upnp", [](const char* a) {
-        if (strcmp(a, "help") == 0) {
-            cliPrintf("  %-*s UPnP port forwarding status\n", CLI_HELP_COL, "upnp");
-            cliPrintf("  %-*s renew port mappings + refresh external IP\n", CLI_HELP_COL, "upnp update");
-            return;
-        }
+        if (cliWantsHelp(a)) { cliPrintf("%-*s UPnP port forwarding status\n", CLI_HELP_COL, "upnp"); return; }
         upnpStatus(w);
     });
 }
