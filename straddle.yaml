@@ -12,3 +12,8 @@ optional_requires:
   # upnp.cpp registers on-device Settings panes via spangap-lcd's
   # lcdSetting* helpers, gated on CONFIG_SPANGAP_LCD.
   - spangap/spangap-lcd
+# Auto-init: folded into the buildable's generated spangapInitStraddles().
+# upnpInit() registers net-event callbacks, a cron entry, and a CLI verb —
+# order-independent once net/storage/cron/cli are up. Default order (100).
+init:
+  - call: upnpInit
