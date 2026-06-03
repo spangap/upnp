@@ -14,6 +14,6 @@ optional_requires:
   - spangap/spangap-lcd
 # Auto-init: folded into the buildable's generated spangapInitStraddles().
 # upnpInit() registers net-event callbacks, a cron entry, and a CLI verb —
-# order-independent once net/storage/cron/cli are up. Default order (100).
+# net/storage/cron/cli are all up by the time the straddle band runs.
 init:
   - call: upnpInit
