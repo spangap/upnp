@@ -446,17 +446,6 @@ static void upnpStatus(cli_write_fn write) {
 /* Module config version. Bump when adding/changing defaults. See duckdns.cpp. */
 #define UPNP_VERSION 1
 
-#if CONFIG_SPANGAP_LCD
-#include "lcd.h"
-/* On-device Settings → Net → UPnP pane. Mirrors the browser UpnpPanel. */
-static void upnpSettingsPane(void* arg) {
-    lv_obj_t* p = static_cast<lv_obj_t*>(arg);
-    lcdSettingSection(p, "UPnP");
-    lcdSettingSwitch (p, "Enable",        "s.upnp.enable");
-    lcdSettingText   (p, "External port", "s.upnp.ext_port");   /* 0 = use HTTPS port */
-}
-#endif
-
 void upnpInit() {
     int v = storageGetInt("s.upnp.version", 0);
     if (v < UPNP_VERSION) {
@@ -465,10 +454,6 @@ void upnpInit() {
         cronDefault("*/15 * * * * N", "upnp update");
         storageSet("s.upnp.version", UPNP_VERSION);
     }
-
-#if CONFIG_SPANGAP_LCD
-    lcdRegisterSettings("Net/UPnP", "UPnP", upnpSettingsPane);
-#endif
 
     netRegister(NET_EV_UPSTREAM_UP,   upnpStart);
     netRegister(NET_EV_UPSTREAM_DOWN, upnpStop);
