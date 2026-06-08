@@ -15,3 +15,9 @@ init:
   - call: upnpInit
   - call: upnpLcdRegister
     when: spangap/spangap-lcd
+# Browser auto-registration (parallel to init:): staging upnp into a browser
+# buildable imports registerUpnp (upnp/modules/upnp) into straddles.gen.ts and
+# injects the file: dep — the UPnP pane appears under Settings → Network with
+# no consumer edit.
+browser_register:
+  - call: registerUpnp
