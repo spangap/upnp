@@ -19,5 +19,5 @@ static void upnpSettingsPane(void* arg) {
  * (spangap/spangap-lcd). Plain C++ linkage to match the generated dispatcher's
  * forward decl. */
 void upnpLcdRegister(void) {
-    lcdRegisterSettings("Net/UPnP", "UPnP", upnpSettingsPane);
+    lcdRegisterSettings("Internet/UPnP", "UPnP", upnpSettingsPane);
 }
