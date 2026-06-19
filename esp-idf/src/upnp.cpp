@@ -176,7 +176,7 @@ static bool ssdpDiscover() {
         int sent = sendto(fd, msearch, strlen(msearch), 0,
                           (struct sockaddr*)&mcast, sizeof(mcast));
         if (sent < 0) {
-            err("SSDP: sendto failed: %d\n", errno);
+            err("SSDP: sendto failed: %s (errno %d)\n", strerror(errno), errno);
             close(fd);
             return false;
         }
