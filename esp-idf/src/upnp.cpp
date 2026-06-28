@@ -449,8 +449,8 @@ static void upnpStatus(cli_write_fn write) {
 void upnpInit() {
     int v = storageGetInt("s.upnp.version", 0);
     if (v < UPNP_VERSION) {
-        storageDefault("s.upnp.enable",   0);
-        storageDefault("s.upnp.ext_port", 0);
+        /* s.upnp.{enable,ext_port} defaults are seeded by the generated
+         * spangapSettingsGenDefaults() from this straddle's `settings:` block. */
         cronDefault("*/15 * * * * N", "upnp update");
         storageSet("s.upnp.version", UPNP_VERSION);
     }

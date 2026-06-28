@@ -13,11 +13,19 @@ requires:
 # net/storage/cron/cli are all up by the time the straddle band runs.
 init:
   - call: upnpInit
-  - call: upnpLcdRegister
-    when: spangap/spangap-lcd
-# Browser auto-registration (parallel to init:): staging upnp into a browser
-# buildable imports registerUpnp (upnp/modules/upnp) into straddles.gen.ts and
-# injects the file: dep — the UPnP pane appears under Settings → Network with
-# no consumer edit.
-browser_register:
-  - call: registerUpnp
+# The UPnP pane's web half is now generated from the `settings:` block below
+# (registered via the buildable's straddles.gen.ts registerGeneratedPanels),
+# so this straddle no longer ships a browser module / browser_register hook.
+
+# Declarative settings: the UPnP pane (LCD + web + storage defaults from one
+# source). Fully static, so no hand-written upnp_lcd.cpp / UpnpPanel.vue /
+# storageDefault() trio.
+settings:
+  - menu:
+      - { id: network, label: "Internet", placement: 2 }
+      - { id: upnp, label: "UPnP" }
+    rows:
+      - section: "UPnP"
+      - switch: { label: "Enable", key: "s.upnp.enable", default: 0 }
+      - text:   { label: "External port", key: "s.upnp.ext_port", default: 0 }
+      - caption: "0 uses the same port as the device HTTPS listener (s.net.https_port). The device maps TCP for HTTPS and UDP for WebRTC (s.net.webrtc_port)."
