@@ -8,11 +8,11 @@ browser: browser
 platforms: [idf]
 requires:
   - spangap/spangap-net
-# Auto-init: folded into the buildable's generated spangapInitStraddles().
-# upnpInit() registers net-event callbacks, a cron entry, and a CLI verb —
-# net/storage/cron/cli are all up by the time the straddle band runs.
-init:
-  - call: upnpInit
+# Auto-init: the generated dispatcher constructs UpnpService and calls its
+# onInit() in the straddle band. onInit() registers net-event callbacks, a cron
+# entry, and a CLI verb — net/storage/cron/cli are all up by the time it runs.
+services:
+  - { class: UpnpService, header: upnp.h }
 # The UPnP pane's web half is now generated from the `settings:` block below
 # (registered via the buildable's straddles.gen.ts registerGeneratedPanels),
 # so this straddle no longer ships a browser module / browser_register hook.

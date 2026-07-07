@@ -446,7 +446,7 @@ static void upnpStatus(cli_write_fn write) {
 /* Module config version. Bump when adding/changing defaults. See duckdns.cpp. */
 #define UPNP_VERSION 1
 
-void upnpInit() {
+void UpnpService::onInit() {
     int v = storageGetInt("s.upnp.version", 0);
     if (v < UPNP_VERSION) {
         /* s.upnp.{enable,ext_port} defaults are seeded by the generated
