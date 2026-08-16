@@ -21,8 +21,8 @@ services:
 # source). Fully static, so no hand-written upnp_lcd.cpp / UpnpPanel.vue /
 # storageDefault() trio.
 settings:
-  - menu:
-      - { id: network, label: "Internet", placement: 2 }
+  - at:
+      - { id: network, label: "Internet", order: 2 }
       - { id: upnp, label: "UPnP" }
     rows:
       - section: "UPnP"
