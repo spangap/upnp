@@ -54,7 +54,7 @@ CLI verbs.
 
 ## Settings
 
-upnp owns two settings, surfaced as a generated **Settings → Internet → UPnP**
+upnp owns two settings, surfaced as a generated **Settings → WiFi & Network → UPnP**
 pane (an Enable switch, an External-port field, and a caption — no live mapping
 view; re-mapping is the `upnp update` CLI):
 

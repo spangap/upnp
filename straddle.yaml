@@ -22,7 +22,7 @@ services:
 # storageDefault() trio.
 settings:
   - at:
-      - { id: network, label: "Internet", order: 2 }
+      - { id: net }
       - { id: upnp, label: "UPnP" }
     rows:
       - section: "UPnP"
