@@ -10,7 +10,6 @@
 #include "log.h"
 #include "compat.h"
 #include "net.h"
-#include "cron.h"
 #include <lwip/sockets.h>
 #include <esp_http_client.h>
 #include "esp_heap_caps.h"
@@ -443,17 +442,23 @@ static void upnpStatus(cli_write_fn write) {
     }
 }
 
-/* Module config version. Bump when adding/changing defaults. See duckdns.cpp. */
-#define UPNP_VERSION 1
+/* The cron entry exists exactly while UPnP is enabled: mapping renewal stops
+ * dead on disable, and a disabled module doesn't hold a slot in cron's
+ * schedule. storageDefault (not Set) so a user's tweak to the schedule
+ * survives while enabled; a disable/enable cycle restores the stock line.
+ * Hosted on the storage task — this module has no long-lived task of its own. */
+static void upnpApplyCron(const char*, const char*) {
+    if (storageGetInt("s.upnp.enable"))
+        storageDefault("s.cron.tab.upnp", "*/15 * * * * N upnp update");
+    else if (storageExists("s.cron.tab.upnp"))
+        storageUnset("s.cron.tab.upnp");
+}
 
 void UpnpService::onInit() {
-    int v = storageGetInt("s.upnp.version", 0);
-    if (v < UPNP_VERSION) {
-        /* s.upnp.{enable,ext_port} defaults are seeded by the generated
-         * spangapSettingsGenDefaults() from this straddle's `settings:` block. */
-        cronDefault("*/15 * * * * N", "upnp update");
-        storageSet("s.upnp.version", UPNP_VERSION);
-    }
+    /* s.upnp.{enable,ext_port} defaults are seeded by the generated
+     * spangapSettingsGenDefaults() from this straddle's `settings:` block. */
+    storageSubscribeChanges("s.upnp.enable", upnpApplyCron, /*onStorageTask=*/true);
+    upnpApplyCron(nullptr, nullptr);
 
     netRegister(NET_EV_UPSTREAM_UP,   upnpStart);
     netRegister(NET_EV_UPSTREAM_DOWN, upnpStop);

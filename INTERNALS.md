@@ -75,9 +75,12 @@ their own cron entry in the [duckdns](../duckdns) straddle.
 
 ## 5. Renewal & state
 
-`upnpInit` seeds a cron entry `*/15 * * * * N` → `upnp update` (every 15
-minutes), which renews the leases ahead of the 3600 s expiry and re-asserts the
-mappings after a router reboot. Net-up re-installs immediately; net-down deletes.
+`upnpApplyCron` keeps `s.cron.tab.upnp = "*/15 * * * * N upnp update"` in step
+with `s.upnp.enable` (present while enabled — `storageDefault`, so a schedule
+tweak survives — removed on disable), applied at init and via a
+storage-task-hosted subscription on the enable key. The 15-minute tick renews
+the leases ahead of the 3600 s expiry and re-asserts the mappings after a router
+reboot. Net-up re-installs immediately; net-down deletes.
 
 `activeForwards` (`std::vector<fwd_t>{extPort,intPort,proto}`) is the in-RAM
 record of what was installed, used by `upnpStop()` to delete exactly those
@@ -103,11 +106,6 @@ are reconstructed on every sync and reported through the `upnp` CLI only.
 
 These do not describe behavior to rely on — they are pending tidies:
 
-- **`s.upnp.version` config gate.** `upnpInit` reads `s.upnp.version` and seeds
-  the cron entry only when it is below `UPNP_VERSION` (1). With no users and the
-  no-migrations policy, this version gate should be dropped and the cron default
-  seeded unconditionally; the `s.upnp.{enable,ext_port}` defaults already come
-  from the generated `settings:` block.
 - **Vestigial `browser/` module.** `straddle.yaml` still has a `browser: browser`
   field and a `browser/` directory containing only `package.json` (its `src/`
   has empty `modules/` and `panels/`). The web pane is generated from the
