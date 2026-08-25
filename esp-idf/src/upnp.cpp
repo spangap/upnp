@@ -377,6 +377,20 @@ static void upnpSyncTask(void*) {
         trackForward(extPort, httpsPort, "TCP");
     }
 
+    /* Forward HTTP (TCP), on the OUTSIDE port 80 whatever the device listens
+     * on. That number is not a preference: an HTTP-01 challenge is fetched on
+     * port 80 or it is not fetched, so a certificate obtained over web auth
+     * needs this mapping and no other. */
+    if (storageGetInt("s.upnp.fwd_http")) {
+        int httpPort = storageGetInt("s.net.http_port", 80);
+        if (httpPort > 0) {
+            char httpDesc[40];
+            snprintf(httpDesc, sizeof(httpDesc), "%s-http", hostname);
+            addPortMapping(80, httpPort, "TCP", localIp, httpDesc);
+            trackForward(80, httpPort, "TCP");
+        }
+    }
+
     /* Forward WebRTC DataChannel (UDP) */
     int webrtcPort = storageGetInt("s.net.webrtc_port", 0);
     if (webrtcPort > 0) {
@@ -455,8 +469,17 @@ static void upnpApplyCron(const char*, const char*) {
 }
 
 void UpnpService::onInit() {
-    /* s.upnp.{enable,ext_port} defaults are seeded by the generated
-     * spangapSettingsGenDefaults() from this straddle's `settings:` block. */
+    /* s.upnp.{enable,fwd_http} defaults are seeded by the generated
+     * spangapSettingsGenDefaults() from this straddle's `settings:` block. The
+     * external port is seeded HERE because its default is a number only the
+     * device knows: the port the web server is actually configured for. A
+     * yaml `default:` is a build-time literal and could only guess at it. */
+    /* storageSet, not storageDefault: a device that has run an earlier build
+     * carries a stored 0, which storageDefault would leave standing. 0 was
+     * never a port anyone asked for — it was the old "reuse the HTTPS port"
+     * sentinel — so it is the absence of a value, and this is what fills it. */
+    if (storageGetInt("s.upnp.ext_port", 0) <= 0)
+        storageSet("s.upnp.ext_port", storageGetInt("s.net.https_port", 443));
     storageSubscribeChanges("s.upnp.enable", upnpApplyCron, /*onStorageTask=*/true);
     upnpApplyCron(nullptr, nullptr);
 

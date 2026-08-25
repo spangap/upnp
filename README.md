@@ -16,16 +16,20 @@ any subset. See the cross-cutting overview in
 ## What it does
 
 When the network comes up, upnp finds the gateway by SSDP multicast, reads its
-device description, and installs two port mappings via SOAP:
+device description, and installs port mappings via SOAP:
 
 - **HTTPS over TCP** — the device's HTTPS listener (`s.net.https_port`, default
   443) mapped from an external TCP port.
 - **WebRTC over UDP** — the device's WebRTC data-channel port
   (`s.net.webrtc_port`, default 4433) mapped from the same UDP port.
+- **HTTP over TCP**, with `s.upnp.fwd_http` set — the device's HTTP listener
+  (`s.net.http_port`) mapped from external port **80**, which is not a
+  preference: an ACME HTTP-01 challenge is fetched on port 80 or it is not
+  fetched at all.
 
-The external TCP port is `s.upnp.ext_port`; when it is `0` (the default) the
-HTTPS port number is reused on the outside. The mappings carry a 3600-second
-lease and are renewed by a cron entry every 15 minutes, so they survive router
+The external TCP port for HTTPS is `s.upnp.ext_port`, seeded on first boot from
+the port the web server is actually configured for. The mappings carry a
+3600-second lease and are renewed by a cron entry every 15 minutes, so they survive router
 reboots and lease expiry. The device's identity in the router admin UI is its
 hostname (`s.net.hostname`) for the TCP mapping and `<hostname>-webrtc` for the
 UDP one.
@@ -55,19 +59,21 @@ CLI verbs.
 ## Settings
 
 upnp owns two settings, surfaced as a generated **Settings → WiFi & Network → UPnP**
-pane (an Enable switch, an External-port field, and a caption — no live mapping
-view; re-mapping is the `upnp update` CLI):
+pane (an Enable switch, an External-port field and the port-80 switch — no live
+mapping view; re-mapping is the `upnp update` CLI):
 
 | Key | Default | Meaning |
 |---|---|---|
 | `s.upnp.enable` | `0` | Master switch. When `0`, no discovery or mapping happens. |
-| `s.upnp.ext_port` | `0` | Desired external TCP port for HTTPS. `0` reuses the device's HTTPS port number. The router may decline the requested port. |
+| `s.upnp.ext_port` | `s.net.https_port` | Desired external TCP port for HTTPS, seeded from the configured HTTPS port because that is a number only the device knows. The router may decline the requested port. |
+| `s.upnp.fwd_http` | `0` | Also map external port 80 to the device's HTTP listener — what ACME's web-auth challenge needs. |
 
 It also reads keys owned by other straddles (it never defines or defaults them):
 
 | Key | Owner | Use |
 |---|---|---|
-| `s.net.https_port` | [spangap-web](../spangap-web) (via net) | Internal HTTPS port mapped over TCP (default 443). |
+| `s.net.https_port` | [spangap-web](../spangap-web) (via net) | Internal HTTPS port mapped over TCP (default 443), and what `s.upnp.ext_port` is seeded from. |
+| `s.net.http_port` | [spangap-web](../spangap-web) (via net) | Internal HTTP port, mapped from external 80 while `s.upnp.fwd_http` is set. |
 | `s.net.webrtc_port` | [spangap-web](../spangap-web) | WebRTC port mapped over UDP (default 4433). |
 | `s.net.hostname` | [spangap-net](../spangap-net) | Used as the mapping description in the router UI. |
 

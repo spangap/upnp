@@ -23,9 +23,13 @@ services:
 settings:
   - at:
       - { id: net }
-      - { id: upnp, label: "UPnP" }
+      - { id: reachable }
+    order: 2
     rows:
-      - section: "UPnP"
-      - switch: { label: "Enable", key: "s.upnp.enable", default: 0 }
-      - text:   { label: "External port", key: "s.upnp.ext_port", default: 0 }
-      - caption: "0 uses the same port as the device HTTPS listener (s.net.https_port). The device maps TCP for HTTPS and UDP for WebRTC (s.net.webrtc_port)."
+      - heading: "UPnP"
+      - caption: "Your home router is often reachable from the internet. We just need to make sure it knows to connect to this device when someone connects to it. UPnP automates that. Some routers have it turned on by default, sometimes you have to allow it in your router's settings. Or you can forward a port directly if this device's IP on your network is fixed."
+      - switch: { label: "Enable UPnP", key: "s.upnp.enable", default: 0 }
+      # No default here: upnp.cpp seeds it from the HTTPS port the web server is
+      # actually configured for, which is a number only the device knows.
+      - integer: { label: "External port", key: "s.upnp.ext_port", min: 1, max: 65535 }
+      - switch: { label: "Forward port 80 also", key: "s.upnp.fwd_http", default: 0 }
