@@ -2,7 +2,12 @@
  * UPnP IGD client — SSDP discovery + SOAP port forwarding.
  *
  * SSDP via raw UDP multicast. XML fetch and SOAP via esp_http_client (plain HTTP on LAN).
- * All HTTP work runs on temp tasks (6KB stack). Renewal timer every 20 minutes.
+ * All HTTP work runs on temp tasks (6KB stack); renewal is the s.cron.tab.upnp entry.
+ *
+ * Each sync builds the whole forward set — this straddle's own three (HTTPS,
+ * HTTP-for-ACME, WebRTC) plus every listener net reports as public-facing — and
+ * reconciles the gateway against it: install what is wanted, delete what is not
+ * wanted any more.
  */
 #include "upnp.h"
 #include "storage.h"
@@ -30,8 +35,15 @@ static std::string prevExtIp;         // for change detection
 static char localIp[16] = {};
 static bool discovered = false;
 static volatile bool syncBusy = false;
+/* A trigger that arrived while a sync was in flight — a listener opening or
+ * closing mid-sync would otherwise wait for the next cron tick to be noticed. */
+static volatile bool resyncPending = false;
 
-struct fwd_t { int extPort; int intPort; char proto[4]; };
+/* One port mapping: the router's side, this device's side, and the name the
+ * router admin UI shows for it. */
+struct fwd_t { int extPort; int intPort; char proto[4]; char desc[48]; };
+/* What the gateway is currently holding for us — the delete set on shutdown,
+ * and what each sync diffs the newly-built wanted set against. */
 static std::vector<fwd_t> activeForwards;
 static char prevLocalIp[16] = {};
 
@@ -319,31 +331,82 @@ static void deletePortMapping(int extPort, const char* proto) {
     dbg("deleted forward %s %d\n", proto, extPort);
 }
 
-static void trackForward(int extPort, int intPort, const char* proto) {
-    for (auto& f : activeForwards) {
-        if (f.extPort == extPort && strcmp(f.proto, proto) == 0) {
-            f.intPort = intPort;
-            return;
-        }
-    }
-    fwd_t entry = {extPort, intPort, {}};
+/* ---- The wanted set ---- */
+
+/* A mapping is identified by what the router keys it on: external port +
+ * protocol. Two entries claiming the same pair are the same mapping. */
+static bool sameMapping(const fwd_t& a, const fwd_t& b) {
+    return a.extPort == b.extPort && strcmp(a.proto, b.proto) == 0;
+}
+
+static void wantForward(std::vector<fwd_t>& wanted, int extPort, int intPort,
+                        const char* proto, const char* desc) {
+    if (extPort <= 0 || intPort <= 0) return;
+    fwd_t entry = {extPort, intPort, {}, {}};
     safeStrncpy(entry.proto, proto, sizeof(entry.proto));
-    activeForwards.push_back(entry);
+    safeStrncpy(entry.desc, desc, sizeof(entry.desc));
+    /* First claim on an external port wins: this straddle's own three are added
+     * before net's list, so a listener that happens to sit on the HTTPS port
+     * doesn't push a second, conflicting mapping at the router. */
+    for (auto& f : wanted) if (sameMapping(f, entry)) return;
+    wanted.push_back(entry);
+}
+
+/* Build the complete set of mappings this device wants right now. */
+static void buildWanted(std::vector<fwd_t>& wanted) {
+    /* The description is what the router admin UI lists the mapping under, so
+     * it names the device and then what the mapping is for. */
+    char hostname[32];
+    storageGetStr("s.net.hostname", hostname, sizeof(hostname), "");
+    char desc[48];
+
+    /* HTTPS (TCP) — the one mapping whose external port is the operator's to
+     * choose, since it is the port they will type into a browser. */
+    int httpsPort = storageGetInt("s.net.https_port", 443);
+    int extPort = storageGetInt("s.upnp.ext_port", 0);
+    if (extPort <= 0) extPort = httpsPort;
+    wantForward(wanted, extPort, httpsPort, "TCP", hostname);
+
+    /* HTTP (TCP), on the OUTSIDE port 80 whatever the device listens on. That
+     * number is not a preference: an HTTP-01 challenge is fetched on port 80 or
+     * it is not fetched, so a certificate obtained over web auth needs this
+     * mapping and no other. */
+    if (storageGetInt("s.upnp.fwd_http")) {
+        snprintf(desc, sizeof(desc), "%s-http", hostname);
+        wantForward(wanted, 80, storageGetInt("s.net.http_port", 80), "TCP", desc);
+    }
+
+    /* WebRTC DataChannel (UDP), same port on both sides. */
+    int webrtcPort = storageGetInt("s.net.webrtc_port", 0);
+    snprintf(desc, sizeof(desc), "%s-webrtc", hostname);
+    wantForward(wanted, webrtcPort, webrtcPort, "UDP", desc);
+
+    /* Every listener whose owner asked for it — an RNS TCP incoming port, the
+     * RNode TCP door, anything that registers a public-facing port with net.
+     * Outside port equals inside port: the port a caller dials is the port the
+     * service answers on, and a mesh peer is given one number, not two. This
+     * straddle knows none of those services, only that net has ports open on
+     * their behalf. */
+    net_public_port_t pub[NET_MAX_ENDPOINTS];
+    int n = netPublicPorts(pub, NET_MAX_ENDPOINTS);
+    for (int i = 0; i < n; i++) {
+        snprintf(desc, sizeof(desc), "%s-%u", hostname, (unsigned)pub[i].port);
+        wantForward(wanted, pub[i].port, pub[i].port, "TCP", desc);
+    }
 }
 
 /* ---- Sync task ---- */
 
-static void upnpSyncTask(void*) {
-    syncBusy = true;
+static void upnpSyncOnce() {
     netActivity();
 
     if (!discovered) {
-        if (!ssdpDiscover()) { syncBusy = false; killSelf(); return; }
+        if (!ssdpDiscover()) return;
         discovered = true;
     }
 
     netGetLocalIp(localIp, sizeof(localIp));
-    if (!localIp[0]) { syncBusy = false; killSelf(); return; }
+    if (!localIp[0]) return;
 
     /* Detect IP change */
     bool ipChanged = strcmp(localIp, prevLocalIp) != 0;
@@ -361,45 +424,48 @@ static void upnpSyncTask(void*) {
         }
     }
 
-    /* UPnP description tag: hostname for the TCP mapping; "<hostname>-webrtc"
-     * for the UDP one (so routers' admin UI lists them clearly). */
-    char hostname[32];
-    storageGetStr("s.net.hostname", hostname, sizeof(hostname), "");
-    char webrtcDesc[40];
-    snprintf(webrtcDesc, sizeof(webrtcDesc), "%s-webrtc", hostname);
+    std::vector<fwd_t> wanted;
+    buildWanted(wanted);
 
-    /* Forward HTTPS (TCP) */
-    int httpsPort = storageGetInt("s.net.https_port", 443);
-    if (httpsPort > 0) {
-        int extPort = storageGetInt("s.upnp.ext_port", 0);
-        if (extPort <= 0) extPort = httpsPort;
-        addPortMapping(extPort, httpsPort, "TCP", localIp, hostname);
-        trackForward(extPort, httpsPort, "TCP");
-    }
-
-    /* Forward HTTP (TCP), on the OUTSIDE port 80 whatever the device listens
-     * on. That number is not a preference: an HTTP-01 challenge is fetched on
-     * port 80 or it is not fetched, so a certificate obtained over web auth
-     * needs this mapping and no other. */
-    if (storageGetInt("s.upnp.fwd_http")) {
-        int httpPort = storageGetInt("s.net.http_port", 80);
-        if (httpPort > 0) {
-            char httpDesc[40];
-            snprintf(httpDesc, sizeof(httpDesc), "%s-http", hostname);
-            addPortMapping(80, httpPort, "TCP", localIp, httpDesc);
-            trackForward(80, httpPort, "TCP");
+    /* Withdraw first: a mapping whose service has gone — a listener switched
+     * off, port 80 no longer wanted — is a hole in the NAT that outlives what
+     * it was opened for. The router is the only place that record lives, so it
+     * has to be told while the link is still up. */
+    for (auto& f : activeForwards) {
+        bool keep = false;
+        for (auto& w : wanted) if (sameMapping(f, w)) { keep = true; break; }
+        if (!keep) {
+            deletePortMapping(f.extPort, f.proto);
+            info("withdrew %s %d\n", f.proto, f.extPort);
         }
     }
 
-    /* Forward WebRTC DataChannel (UDP) */
-    int webrtcPort = storageGetInt("s.net.webrtc_port", 0);
-    if (webrtcPort > 0) {
-        addPortMapping(webrtcPort, webrtcPort, "UDP", localIp, webrtcDesc);
-        trackForward(webrtcPort, webrtcPort, "UDP");
-    }
+    /* Then (re-)assert every wanted mapping. Unconditional, not just for the
+     * new ones: this is also the lease renewal, and what re-installs the whole
+     * set after a router reboot. */
+    for (auto& f : wanted)
+        addPortMapping(f.extPort, f.intPort, f.proto, localIp, f.desc);
+
+    /* Tracked whether or not the router accepted them: a mapping we asked for
+     * and did not get is one we still want deleted if it turns out to be
+     * there, and DeletePortMapping on a mapping that was never installed is a
+     * no-op. */
+    activeForwards = wanted;
 
     /* DuckDNS updates are driven by cron — don't piggy-back on UPnP renewal. */
+}
 
+static void upnpSyncTask(void*) {
+    syncBusy = true;
+    /* A trigger that lands mid-sync earns one more pass rather than waiting for
+     * the cron tick: net publishes a port the moment its socket opens, which is
+     * exactly when a sync is likely to be running. A trigger arriving in the
+     * window between the last check and clearing syncBusy still waits — a lost
+     * race here costs a renewal interval, not a mapping. */
+    do {
+        resyncPending = false;
+        upnpSyncOnce();
+    } while (resyncPending);
     syncBusy = false;
     killSelf();
 }
@@ -407,7 +473,8 @@ static void upnpSyncTask(void*) {
 /* ---- Public API ---- */
 
 static void upnpUpdate() {
-    if (!storageGetInt("s.upnp.enable") || syncBusy) return;
+    if (!storageGetInt("s.upnp.enable")) return;
+    if (syncBusy) { resyncPending = true; return; }
     spawnTask(upnpSyncTask, "upnp", 6144, nullptr, 1, 0);
 }
 
@@ -450,8 +517,8 @@ static void upnpStatus(cli_write_fn write) {
         write(buf, (size_t)n);
     }
     for (auto& f : activeForwards) {
-        n = snprintf(buf, sizeof(buf), "forward: %s %d → %s:%d\n",
-                     f.proto, f.extPort, localIp, f.intPort);
+        n = snprintf(buf, sizeof(buf), "forward: %s %d → %s:%d (%s)\n",
+                     f.proto, f.extPort, localIp, f.intPort, f.desc);
         write(buf, (size_t)n);
     }
 }
@@ -482,9 +549,19 @@ void UpnpService::onInit() {
         storageSet("s.upnp.ext_port", storageGetInt("s.net.https_port", 443));
     storageSubscribeChanges("s.upnp.enable", upnpApplyCron, /*onStorageTask=*/true);
     upnpApplyCron(nullptr, nullptr);
+    /* The external port and the port-80 switch describe mappings, so a change
+     * to either is a change to the wanted set — and the sync withdraws what it
+     * no longer wants, so the old mapping goes with the new one arriving. */
+    storageSubscribeChanges("s.upnp.", ON_CHANGE { (void)key; (void)val; upnpUpdate(); },
+                            /*onStorageTask=*/true);
 
     netRegister(NET_EV_UPSTREAM_UP,   upnpStart);
     netRegister(NET_EV_UPSTREAM_DOWN, upnpStop);
+    /* A listener published to the internet — or withdrawn from it — is worth a
+     * sync now: an operator who has just switched a port on expects to be
+     * reachable on it, not reachable in a quarter of an hour. The handler runs
+     * on whoever changed the ports, so it only ever spawns the sync task. */
+    netRegister(NET_EV_PORTS_CHANGED, upnpStart);
     static auto w = [](const char* d, size_t l) { cliPrintf("%.*s", (int)l, d); };
     cliRegisterCmd("upnp update", [](const char* a) {
         if (cliWantsHelp(a)) { cliPrintf("%-*s renew port mappings + refresh external IP\n", CLI_HELP_COL, "upnp update"); return; }

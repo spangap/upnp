@@ -4,8 +4,9 @@
 
 **upnp** is a UPnP IGD (Internet Gateway Device) port-mapping client for
 [spangap](../spangap) devices. It discovers the home router on the LAN and asks
-it to map external ports to the device, so the device's HTTPS server and WebRTC
-data channel are reachable from outside the NAT.
+it to map external ports to the device, so the device's HTTPS server, WebRTC
+data channel and any listener published to the internet are reachable from
+outside the NAT.
 
 Paired with [duckdns](../duckdns) (a stable public hostname) and
 [acme](../acme) (a real TLS certificate), it completes the remote-access stack
@@ -26,23 +27,42 @@ device description, and installs port mappings via SOAP:
   (`s.net.http_port`) mapped from external port **80**, which is not a
   preference: an ACME HTTP-01 challenge is fetched on port 80 or it is not
   fetched at all.
+- **Any listener another straddle has published to the internet** — mapped from
+  the same external port as the port it listens on.
+
+That last one is how a service gets forwarded without upnp knowing it exists.
+A straddle registering a TCP listener with [spangap-net](../spangap-net) sets
+`publicFacing` in its registration; net reports every flagged port that is
+actually open, and upnp maps each of them. Two panes offer that as a switch
+today — **"Accessible from internet"** on each of
+[iface-tcp](../iface-tcp)'s RNS incoming ports (on by default) and on
+[iface-lora](../iface-lora)'s RNode TCP door (off by default) — and each switch
+appears only in a build that stages this straddle.
+
+Every sync rebuilds that whole set and reconciles the router against it: a
+mapping the device no longer wants is deleted while the link is still up, since
+the router is the only place that record lives. A mapping arriving or leaving is
+acted on at once, not at the next renewal — upnp re-syncs on
+`NET_EV_PORTS_CHANGED` and on a change to its own settings.
 
 The external TCP port for HTTPS is `s.upnp.ext_port`, seeded on first boot from
 the port the web server is actually configured for. The mappings carry a
 3600-second lease and are renewed by a cron entry every 15 minutes, so they survive router
 reboots and lease expiry. The device's identity in the router admin UI is its
-hostname (`s.net.hostname`) for the TCP mapping and `<hostname>-webrtc` for the
-UDP one.
+hostname (`s.net.hostname`) — plain for the HTTPS mapping, and suffixed for the
+others: `<hostname>-http`, `<hostname>-webrtc`, and `<hostname>-<port>` for a
+published listener.
 
 upnp starts automatically when the straddle is in the build — there is no init
-call to make. It registers for network up/down events, a cron renewal, and two
-CLI verbs.
+call to make. It registers for network up/down and port-set events, a cron
+renewal, and two CLI verbs.
 
 ### Lifecycle
 
-- On `NET_EV_UPSTREAM_UP` (and on the cron tick, and the `upnp update` CLI), upnp
-  re-discovers the gateway if needed, refreshes the external IP, and re-installs
-  both mappings.
+- On `NET_EV_UPSTREAM_UP` (and on the cron tick, on `NET_EV_PORTS_CHANGED`, on a
+  change to `s.upnp.*`, and on the `upnp update` CLI), upnp re-discovers the
+  gateway if needed, refreshes the external IP, installs every mapping it wants,
+  and deletes any it installed earlier and no longer wants.
 - On `NET_EV_UPSTREAM_DOWN`, upnp **deletes** every mapping it installed
   (synchronously, before the network goes away) and drops its discovered state,
   so it never leaves stale mappings on the router.
@@ -58,9 +78,10 @@ CLI verbs.
 
 ## Settings
 
-upnp owns two settings, surfaced as a generated **Settings → WiFi & Network → UPnP**
+upnp owns three settings, surfaced as a generated **Settings → WiFi & Network → UPnP**
 pane (an Enable switch, an External-port field and the port-80 switch — no live
-mapping view; re-mapping is the `upnp update` CLI):
+mapping view; re-mapping is the `upnp update` CLI). The per-listener switches
+live in the panes of the straddles that own those listeners, not here:
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -76,6 +97,12 @@ It also reads keys owned by other straddles (it never defines or defaults them):
 | `s.net.http_port` | [spangap-web](../spangap-web) (via net) | Internal HTTP port, mapped from external 80 while `s.upnp.fwd_http` is set. |
 | `s.net.webrtc_port` | [spangap-web](../spangap-web) | WebRTC port mapped over UDP (default 4433). |
 | `s.net.hostname` | [spangap-net](../spangap-net) | Used as the mapping description in the router UI. |
+
+The published listeners are not a key at all: they come from net's
+`netPublicPorts()`, whose contents are whatever the owning straddles asked for
+in their own settings (`s.tcp.servers[i].upnp`, `s.lora.rnode.upnp`). Each of
+those keys belongs to its straddle, which reads it and passes the answer to net;
+upnp neither names nor reads them.
 
 There are no storage keys for live mapping state — the discovered gateway,
 external IP, and active mappings live only in RAM and are reported by the `upnp`
@@ -94,8 +121,9 @@ Run either on-device through `spangap cli "<command>"`.
 
 ## Dependencies
 
-- [spangap-net](../spangap-net) — IP stack + LAN UDP multicast (SSDP) and the
-  `NET_EV_UPSTREAM_*` events, local-IP query, and `netActivity()`.
+- [spangap-net](../spangap-net) — IP stack + LAN UDP multicast (SSDP), the
+  `NET_EV_UPSTREAM_*` and `NET_EV_PORTS_CHANGED` events, `netPublicPorts()`,
+  local-IP query, and `netActivity()`.
 
 ## Read next
 
